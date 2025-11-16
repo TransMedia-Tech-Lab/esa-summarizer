@@ -1,0 +1,112 @@
+# バイトコード/キャッシュ
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C拡張
+*.so
+*.pyd
+*.dll
+
+# 配布/パッケージング
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+sdist/
+var/
+wheels/
+share/python-wheels/
+pip-wheel-metadata/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 仮想環境/環境ファイル
+.venv/
+venv/
+env/
+ENV/
+.conda/
+.python-version
+.env
+.env.*
+
+# PyInstaller
+*.spec
+
+# テスト/カバレッジ
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytestdebug.log
+
+# 型チェック/リンタ
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+.pylint.d/
+
+# Jupyter
+.ipynb_checkpoints/
+.jupyter/lab/workspaces/
+
+# ドキュメント
+docs/_build/
+site/
+
+# フレームワーク関連（必要に応じて）
+# Django
+*.log
+local_settings.py
+db.sqlite3
+media/
+staticfiles/
+
+# Flask
+instance/
+*.cfg
+
+# Scrapy
+.scrapy/
+
+# IPython/Spyder/Rope
+profile_default/
+ipython_config.py
+.spyderproject
+.spyproject
+.ropeproject
+
+# IDE/エディタ
+.vscode/
+.idea/
+.history/
+*.code-workspace
+
+# OS生成物
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ログ/一時ファイル
+*.log
+logs/
+*.tmp
+*.temp
+
+# PEP 582
+__pypackages__/
+
