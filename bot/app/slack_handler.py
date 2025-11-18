@@ -149,10 +149,10 @@ class SlackBot:
                 summary = self.gemini_client.summarize(title, body, category, length, style)
                 
                 # 結果を整形して投稿
-                message = self._format_summary_message(
+                message_payload = self._format_summary_message(
                     title, category, updated_at, summary, url, length, style, post_number, len(body)
                 )
-                say(message)
+                say(**message_payload)
                 
             except Exception as e:
                 say(f"<@{user_id}> ❌ 要約生成中にエラーが発生しました: {str(e)}")
@@ -195,7 +195,7 @@ class SlackBot:
             summary = self.gemini_client.summarize(title, body, category, length, style)
             
             # 結果を整形して投稿
-            message = self._format_summary_message(
+            message_payload = self._format_summary_message(
                 title, category, updated_at, summary, url, length, style, post_number, len(body)
             )
             
@@ -204,9 +204,7 @@ class SlackBot:
                 try:
                     client.chat_postMessage(
                         channel=channel_id,
-                        text=message,
-                        unfurl_links=False,
-                        unfurl_media=False
+                        **message_payload
                     )
                     logger.info(f"✅ チャンネル {channel_id} へ投稿完了")
                 except Exception as e:
@@ -218,8 +216,119 @@ class SlackBot:
             logger.error(f"自動要約エラー ({url}): {str(e)}", exc_info=True)
     
     def _format_summary_message(self, title, category, updated_at, summary, url, length, style, post_number, body_length):
-        """要約結果のメッセージを整形"""
-        return summary
+        """要約結果をSlack Block Kit形式で整形"""
+        summary_mrkdwn = self._convert_markdown_to_mrkdwn(summary)
+        summary_sections = self._build_summary_sections(summary_mrkdwn)
+        fallback_lines = [
+            f"{title}",
+            f"カテゴリ: {category or 'なし'} / 更新: {updated_at or '不明'}",
+            f"esa: {url}",
+            summary_mrkdwn
+        ]
+        fallback_text = "\n".join(line for line in fallback_lines if line).strip()
+        metadata_elements = [
+            {"type": "mrkdwn", "text": f"*カテゴリ*\n{category or 'なし'}"},
+            {"type": "mrkdwn", "text": f"*更新日時*\n{updated_at or '不明'}"},
+            {"type": "mrkdwn", "text": f"*文字数*\n{body_length:,}字"},
+            {"type": "mrkdwn", "text": f"*指定*\n長さ: {length} / 形式: {style}"}
+        ]
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"要約: {title[:140]}",
+                    "emoji": True
+                }
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"<{url}|esa #{post_number or '?'}>"
+                    }
+                ]
+            },
+            {"type": "section", "fields": metadata_elements},
+            {"type": "divider"},
+            *summary_sections,
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"📄 <{url}|記事を開く>"
+                    }
+                ]
+            }
+        ]
+        return {
+            "text": fallback_text[:3000],
+            "blocks": blocks,
+            "unfurl_links": False,
+            "unfurl_media": False
+        }
+
+    def _convert_markdown_to_mrkdwn(self, markdown_text: str) -> str:
+        """簡易的にMarkdownをSlack mrkdwnに変換"""
+        if not markdown_text:
+            return ""
+        lines = markdown_text.strip().splitlines()
+        converted = []
+        in_code_block = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                converted.append("```")
+                continue
+            if in_code_block:
+                converted.append(line)
+                continue
+            if not stripped:
+                converted.append("")
+                continue
+            heading_match = re.match(r"^(#{1,6})\s+(.*)", stripped)
+            if heading_match:
+                content = heading_match.group(2).strip()
+                converted.append(f"*{content}*")
+                continue
+            if stripped.startswith(('- ', '* ', '+ ')):
+                converted.append(f"• {stripped[2:].strip()}")
+                continue
+            converted.append(stripped)
+        mrkdwn = "\n".join(converted)
+        mrkdwn = re.sub(r"\*\*(.*?)\*\*", r"*\\1*", mrkdwn)
+        mrkdwn = re.sub(r"__(.*?)__", r"_\\1_", mrkdwn)
+        return mrkdwn
+
+    def _build_summary_sections(self, summary_text: str):
+        """Slackのsectionブロックに収まるよう要約を分割"""
+        if not summary_text:
+            return [{"type": "section", "text": {"type": "mrkdwn", "text": "要約が空です。"}}]
+        sections = []
+        for chunk in self._chunk_text(summary_text):
+            sections.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": chunk}
+            })
+        return sections
+
+    def _chunk_text(self, text: str, chunk_size: int = 2800):
+        """セクションの文字数制限に沿ってテキストを分割"""
+        chunks = []
+        remaining = text.strip()
+        while remaining:
+            if len(remaining) <= chunk_size:
+                chunks.append(remaining)
+                break
+            split_index = remaining.rfind('\n', 0, chunk_size)
+            if split_index == -1 or split_index < chunk_size * 0.6:
+                split_index = chunk_size
+            chunks.append(remaining[:split_index].rstrip())
+            remaining = remaining[split_index:].lstrip()
+        return chunks
     
     def _get_help_message(self):
         """ヘルプメッセージ"""
