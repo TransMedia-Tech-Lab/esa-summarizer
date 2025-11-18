@@ -2,7 +2,8 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from app.esa_client import EsaClient
 from app.gemini_client import GeminiClient
-from config.settings import SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ESA_WATCH_CHANNEL_ID, ESA_SUMMARY_CHANNEL_IDS
+from config.settings import SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ESA_WATCH_CHANNEL_ID, ESA_SUMMARY_CHANNEL_IDS, DEBUG_VERBOSE
+from app.debug_utils import step, log_kv, truncate
 import logging
 import re
 
@@ -14,6 +15,14 @@ class SlackBot:
         self.app = App(token=SLACK_BOT_TOKEN)
         self.esa_client = EsaClient()
         self.gemini_client = GeminiClient()
+        if DEBUG_VERBOSE:
+            @self.app.middleware  # 全イベント生ボディをログ
+            def log_raw(logger_mw, body, next):
+                try:
+                    logger.debug(f"[RAW EVENT] keys={list(body.keys())} body_trunc={truncate(str(body), 500)}")
+                except Exception:
+                    logger.debug("[RAW EVENT] <unprintable>")
+                return next()
         self.setup_handlers()
     
     def setup_handlers(self):
@@ -22,7 +31,10 @@ class SlackBot:
         @self.app.event("message")
         def handle_message(event, say, client):
             """メッセージイベントを処理（自動要約）"""
-            logger.info(f"メッセージイベント受信: {event}")
+            if DEBUG_VERBOSE:
+                logger.info(f"メッセージイベント受信: {truncate(str(event),800)}")
+            with step("message_event"):
+                log_kv("message.meta", subtype=event.get('subtype'), channel=event.get('channel'))
             
             # 削除のサブタイプは無視（bot_message, message_changedは処理する）
             subtype = event.get('subtype')
@@ -82,12 +94,16 @@ class SlackBot:
                 processed_urls.add(url)
                 
                 # 要約を非同期的に処理（投稿元チャンネルIDを渡す）
-                self._process_auto_summary(url, client, channel_id)
+                with step("auto_summary_one"):
+                    self._process_auto_summary(url, client, channel_id)
         
         @self.app.event("app_mention")
         def handle_mention(event, say):
             """Botへのメンションを処理"""
-            logger.info(f"メンションイベント受信: {event}")
+            if DEBUG_VERBOSE:
+                logger.info(f"メンションイベント受信: {truncate(str(event),800)}")
+            with step("mention_event"):
+                log_kv("mention.meta", user=event.get('user'), channel=event.get('channel'))
             # 安全にテキスト取得（blocksのみの場合のフォールバック）
             text = event.get('text', '') or ''
             if not text and 'blocks' in event:
@@ -165,13 +181,17 @@ class SlackBot:
             
             # 要約生成
             try:
-                summary = self.gemini_client.summarize(title, body, category, length, style)
+                with step("gemini_summarize"):
+                    summary = self.gemini_client.summarize(title, body, category, length, style)
                 
                 # 結果を整形して投稿
-                message_payload = self._format_summary_message(
-                    title, category, updated_at, summary, url, length, style, post_number, len(body)
-                )
-                say(**message_payload)
+                with step("format_and_send"):
+                    message_payload = self._format_summary_message(
+                        title, category, updated_at, summary, url, length, style, post_number, len(body)
+                    )
+                    response = say(**message_payload)
+                    if DEBUG_VERBOSE:
+                        logger.debug(f"chat.postMessage response={truncate(str(response),400)}")
                 
             except Exception as e:
                 say(f"<@{user_id}> ❌ 要約生成中にエラーが発生しました: {str(e)}")
@@ -215,7 +235,8 @@ class SlackBot:
             length = "medium"
             style = "bullet"
             
-            summary = self.gemini_client.summarize(title, body, category, length, style)
+            with step("gemini_auto_summarize"):
+                summary = self.gemini_client.summarize(title, body, category, length, style)
             
             # 結果を整形して投稿
             message_payload = self._format_summary_message(
@@ -225,10 +246,13 @@ class SlackBot:
             # 各チャンネルに投稿
             for channel_id in summary_channel_ids:
                 try:
-                    client.chat_postMessage(
-                        channel=channel_id,
-                        **message_payload
-                    )
+                    with step(f"post_{channel_id}"):
+                        resp = client.chat_postMessage(
+                            channel=channel_id,
+                            **message_payload
+                        )
+                        if DEBUG_VERBOSE:
+                            logger.debug(f"post_result channel={channel_id} ok={getattr(resp,'get',lambda x:True)('ok') if hasattr(resp,'get') else 'n/a'} resp={truncate(str(resp),300)}")
                     logger.info(f"✅ チャンネル {channel_id} へ投稿完了")
                 except Exception as e:
                     logger.error(f"チャンネル {channel_id} への投稿失敗: {e}")

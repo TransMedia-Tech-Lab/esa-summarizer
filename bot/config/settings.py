@@ -54,3 +54,6 @@ SUMMARY_STYLES = {
     "bullet": "箇条書き",
     "paragraph": "段落形式"
 }
+
+# デバッグ詳細フラグ
+DEBUG_VERBOSE = os.getenv("DEBUG_VERBOSE", "false").lower() in ["1", "true", "yes"]
