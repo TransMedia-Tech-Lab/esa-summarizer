@@ -71,10 +71,7 @@ class SlackBot:
                 return
             
             # esaアプリ（または他のBot）からのメッセージか確認
-            # bot_idまたはbot_profileがあればBotからのメッセージ
-            bot_id = event.get('bot_id')
-            bot_profile = event.get('bot_profile')
-            
+            # message_changed の場合はネスト内の bot 情報を使うため、ここで上書きしない
             logger.info(f"チャンネル '{channel_id}' でメッセージ検出: bot_id={bot_id}, bot_profile={bool(bot_profile)}")
             
             if not bot_id and not bot_profile:
@@ -274,8 +271,6 @@ class SlackBot:
         metadata_elements = [
             {"type": "mrkdwn", "text": f"*カテゴリ*\n{category or 'なし'}"},
             {"type": "mrkdwn", "text": f"*更新日時*\n{updated_at or '不明'}"},
-            {"type": "mrkdwn", "text": f"*文字数*\n{body_length:,}字"},
-            {"type": "mrkdwn", "text": f"*指定*\n長さ: {length} / 形式: {style}"}
         ]
         blocks = [
             {
