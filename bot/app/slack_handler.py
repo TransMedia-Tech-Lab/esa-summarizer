@@ -284,8 +284,6 @@ class SlackBot:
         metadata_elements = [
             {"type": "mrkdwn", "text": f"*カテゴリ*\n{category or 'なし'}"},
             {"type": "mrkdwn", "text": f"*更新日時*\n{updated_at or '不明'}"},
-            {"type": "mrkdwn", "text": f"*文字数*\n{body_length:,}字"},
-            {"type": "mrkdwn", "text": f"*指定*\n長さ: {length} / 形式: {style}"}
         ]
         blocks = [
             {
