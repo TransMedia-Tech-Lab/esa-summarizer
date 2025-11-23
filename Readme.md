@@ -132,3 +132,43 @@ python main.py
 - **esa**: REST API
 - **AI**: Google Gemini API
 - **Python**: 3.8+
+
+## デプロイ・運用
+
+### 1. 自動デプロイのセットアップ
+
+GitHub Actions を使用して Cloud Run に自動デプロイする環境を構築します。
+
+1. **Google Cloud の初期設定**
+   ```bash
+   ./setup_automation.sh
+   ```
+   ※ スクリプトの指示に従い、最後に表示される情報を GitHub Secrets に登録してください。
+
+2. **環境変数の設定**
+   ```bash
+   ./setup_secrets.sh
+   ```
+   ※ Slack Token や esa Token などを入力すると、Cloud Run に反映されます。
+
+3. **デプロイ**
+   `main` ブランチにプッシュすると、自動的にデプロイが実行されます。
+
+### 2. Bot の停止・再開
+
+Bot を一時的に停止したり、再開したりするには、Cloud Run の「最小インスタンス数」を変更します。
+
+**停止する場合**
+```bash
+gcloud run services update esa-summarizer --region asia-northeast1 --min-instances 0
+```
+
+**再開する場合**
+```bash
+gcloud run services update esa-summarizer --region asia-northeast1 --min-instances 1
+```
+
+### 3. モニタリング
+
+- **ログの確認**: [Cloud Run ログ](https://console.cloud.google.com/run/detail/asia-northeast1/esa-summarizer/logs?project=esa-summarizer)
+- **支払い状況**: [お支払い管理](https://console.cloud.google.com/billing?project=esa-summarizer)
