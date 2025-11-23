@@ -55,5 +55,6 @@ jobs:
             --port 8080 \
             --min-instances 1 \
             --no-cpu-throttling \
+            --service-account ${{ secrets.GCP_SERVICE_ACCOUNT }} \
             --allow-unauthenticated \
             --quiet
