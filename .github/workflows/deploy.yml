@@ -54,6 +54,6 @@ jobs:
             --platform managed \
             --port 8080 \
             --min-instances 1 \
-            --cpu-throttling=never \
+            --no-cpu-throttling \
             --allow-unauthenticated \
             --quiet
