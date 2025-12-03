@@ -59,6 +59,8 @@ echo "⏳ サービスアカウントを作成しています..."
 if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" >/dev/null 2>&1; then
     gcloud iam service-accounts create "${SERVICE_ACCOUNT}" \
       --display-name="GitHub Actions Deployer"
+    echo "⏳ サービスアカウントの反映を待っています (10秒)..."
+    sleep 10
 else
     echo "  (既存のサービスアカウントを使用します)"
 fi
