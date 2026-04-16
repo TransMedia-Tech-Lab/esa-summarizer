@@ -1,6 +1,12 @@
 import google.generativeai as genai
 import logging
-from config.settings import GEMINI_API_KEY, GEMINI_MODEL, SUMMARY_LENGTHS, SUMMARY_STYLES
+from config.settings import (
+    DEFAULT_GEMINI_MODEL,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    SUMMARY_LENGTHS,
+    SUMMARY_STYLES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -8,7 +14,23 @@ logger = logging.getLogger(__name__)
 class GeminiClient:
     def __init__(self):
         genai.configure(api_key=GEMINI_API_KEY)
-        self.model = genai.GenerativeModel(GEMINI_MODEL)
+        self.model_name = GEMINI_MODEL
+        self.fallback_model_name = DEFAULT_GEMINI_MODEL
+        self.model = genai.GenerativeModel(self.model_name)
+        logger.info(f"Gemini model configured: {self.model_name}")
+
+    def _should_retry_with_fallback(self, error: Exception) -> bool:
+        if self.model_name == self.fallback_model_name:
+            return False
+
+        message = str(error).lower()
+        retry_markers = [
+            "not found",
+            "deprecated",
+            "retired",
+            "unsupported",
+        ]
+        return any(marker in message for marker in retry_markers)
     
     def summarize(
         self, 
@@ -69,5 +91,27 @@ class GeminiClient:
             logger.info(f"要約生成完了: {title}")
             return response.text
         except Exception as e:
+            if self._should_retry_with_fallback(e):
+                logger.warning(
+                    "Gemini model '%s' が利用できないため '%s' にフォールバックします: %s",
+                    self.model_name,
+                    self.fallback_model_name,
+                    str(e),
+                )
+                try:
+                    fallback_model = genai.GenerativeModel(self.fallback_model_name)
+                    response = fallback_model.generate_content(prompt)
+                    logger.info(f"要約生成完了(フォールバック): {title}")
+                    return response.text
+                except Exception as fallback_error:
+                    logger.error(
+                        "Gemini フォールバック失敗 (%s -> %s): %s",
+                        self.model_name,
+                        self.fallback_model_name,
+                        str(fallback_error),
+                        exc_info=True,
+                    )
+                    return f"要約生成エラー: {str(fallback_error)}"
+
             logger.error(f"要約生成エラー ({title}): {str(e)}", exc_info=True)
             return f"要約生成エラー: {str(e)}"

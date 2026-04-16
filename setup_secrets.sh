@@ -52,7 +52,7 @@ gcloud run services update "$SERVICE_NAME" \
   --project="$PROJECT_ID" \
   --region="$REGION" \
   --update-secrets SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_APP_TOKEN=slack-app-token:latest,ESA_ACCESS_TOKEN=esa-access-token:latest,ESA_TEAM_NAME=esa-team-name:latest,GEMINI_API_KEY=gemini-api-key:latest,ESA_WATCH_CHANNEL_ID=esa-watch-channel-id:latest,ESA_SUMMARY_CHANNEL_ID=esa-summary-channel-id:latest \
-  --update-env-vars LOG_LEVEL=INFO
+  --update-env-vars LOG_LEVEL=INFO,GEMINI_MODEL=gemini-2.5-flash-lite
 
 echo ""
 echo "✅ 完了しました！"

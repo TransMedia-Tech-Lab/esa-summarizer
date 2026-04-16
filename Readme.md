@@ -40,6 +40,7 @@ cp .env.example .env
 - `ESA_ACCESS_TOKEN`: esaのアクセストークン
 - `ESA_TEAM_NAME`: esaのチーム名
 - `GEMINI_API_KEY`: Google Gemini APIキー
+- `GEMINI_MODEL`: 使用する Gemini モデル名（省略可、デフォルト: `gemini-2.5-flash-lite`）
 - `LOG_LEVEL`: ログレベル（省略可、デフォルト: `INFO`）
   - `DEBUG`: 詳細なデバッグ情報
   - `INFO`: 一般的な情報（推奨）
@@ -83,6 +84,8 @@ pip install slack-bolt python-dotenv requests google-generativeai
 cd bot
 python main.py
 ```
+
+`gemini-2.5-flash-lite-preview-09-2025` のような preview モデルは廃止されることがあります。`GEMINI_MODEL` は安定版モデル ID を指定してください。
 
 ## 動作フロー
 

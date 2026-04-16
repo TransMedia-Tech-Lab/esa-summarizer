@@ -41,7 +41,8 @@ ESA_API_BASE = "https://api.esa.io/v1"
 
 # Gemini設定
 GEMINI_API_KEY = _clean_env_value(os.getenv("GEMINI_API_KEY"))
-GEMINI_MODEL = "gemini-2.5-flash-lite-preview-09-2025"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = _clean_env_value(os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)) or DEFAULT_GEMINI_MODEL
 
 # 要約設定
 SUMMARY_LENGTHS = {
