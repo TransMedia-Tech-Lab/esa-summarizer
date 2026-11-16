@@ -41,165 +41,192 @@ class SlackBot:
         @self.app.event("message")
         def handle_message(event, say, client):
             """メッセージイベントを処理（自動要約）"""
-            if DEBUG_VERBOSE:
-                logger.info(f"メッセージイベント受信: {truncate(str(event),800)}")
-            with step("message_event"):
-                log_kv("message.meta", subtype=event.get('subtype'), channel=event.get('channel'))
-            
-            # 削除のサブタイプは無視（bot_messageのみ処理する。message_changedは重複防止のため無視）
-            subtype = event.get('subtype')
-            if subtype and subtype not in ['bot_message']:
-                logger.debug(f"サブタイプ '{subtype}' のため無視")
-                return
-            
-            text = event.get('text', '')
-            bot_id = event.get('bot_id')
-            bot_profile = event.get('bot_profile')
-            
-            # blocksのみの場合のフォールバック（esa通知でtextが空になるケース対応）
-            if not text and 'blocks' in event:
-                rebuilt = self._extract_text_from_blocks(event.get('blocks', []))
-                if rebuilt:
-                    text = rebuilt
-                    logger.debug(f"blocksから再構築したテキスト: {text[:200]}")
-            
-            # チャンネルIDを取得
-            channel_id = event.get('channel')
-            logger.debug(f"チャンネルID: {channel_id}, 監視対象: {ESA_WATCH_CHANNEL_ID}")
-            
-            # 監視対象チャンネル以外は無視
-            if not ESA_WATCH_CHANNEL_ID or channel_id != ESA_WATCH_CHANNEL_ID:
-                logger.debug(f"監視対象外のチャンネル '{channel_id}' のため無視")
-                return
-            
-            # esaアプリ（または他のBot）からのメッセージか確認
-            # message_changed の場合はネスト内の bot 情報を使うため、ここで上書きしない
-            logger.info(f"チャンネル '{channel_id}' でメッセージ検出: bot_id={bot_id}, bot_profile={bool(bot_profile)}")
-            
-            if not bot_id and not bot_profile:
-                logger.debug(f"人間からのメッセージのため無視: {text[:50] if text else ''}")
-                return  # 人間のメッセージは無視
-            
-            logger.info(f"Botメッセージを検出: bot_id={bot_id}, チャンネルID={channel_id}")
-            
-            # 自分のメッセージは無視
-            if self.bot_user_id and event.get('user') == self.bot_user_id:
-                logger.debug("自分のメッセージのため無視")
-                return
-            
-            # esa URLを抽出（text/blocks/attachments すべてを見る）
-            urls = self._collect_esa_urls(text, event.get('blocks'), event.get('attachments'))
-            
-            if not urls:
-                return  # esa URLが含まれていなければ無視
-            
-            # 各URLについて要約を生成（重複を除く）
-            processed_urls = set()
-            for url in urls:
-                # URLのクリーンアップ（末尾の記号を除去）
-                url = re.sub(r'[)>]$', '', url)
-                
-                if url in processed_urls:
-                    continue
-                processed_urls.add(url)
-                
-                # 要約を非同期的に処理（投稿元チャンネルIDを渡す）
-                with step("auto_summary_one"):
-                    self._process_auto_summary(url, client, channel_id)
-        
+            self._on_message(event, client)
+
         @self.app.event("app_mention")
         def handle_mention(event, say):
             """Botへのメンションを処理"""
-            if DEBUG_VERBOSE:
-                logger.info(f"メンションイベント受信: {truncate(str(event),800)}")
-            with step("mention_event"):
-                log_kv("mention.meta", user=event.get('user'), channel=event.get('channel'))
-            # 安全にテキスト取得（blocksのみの場合のフォールバック）
-            text = event.get('text', '') or ''
-            if not text and 'blocks' in event:
-                try:
-                    text = self._extract_text_from_blocks(event.get('blocks', []))
-                    logger.debug(f"blocksから再構築したテキスト: {text}")
-                except Exception as e:
-                    logger.warning(f"blocksからテキスト再構築失敗: {e}")
-            user_id = event['user']
-            
-            # Botのメンション部分を除去
-            # <@U12345678> https://... -> https://...
-            text = re.sub(r'<@[A-Z0-9]+>', '', text).strip()
-            
-            # ヘルプメッセージ
-            if not text or 'help' in text.lower() or 'ヘルプ' in text:
-                help_message = self._get_help_message()
-                say(f"<@{user_id}>\n{help_message}")
-                return
-            
-            # パラメータ解析
-            length = "medium"
-            style = "bullet"
-            
-            # --length short などのオプション解析
-            length_match = re.search(r'--length\s+(short|medium|long)', text)
-            if length_match:
-                length = length_match.group(1)
-                text = re.sub(r'--length\s+(short|medium|long)', '', text).strip()
-            
-            style_match = re.search(r'--style\s+(bullet|paragraph)', text)
-            if style_match:
-                style = style_match.group(1)
-                text = re.sub(r'--style\s+(bullet|paragraph)', '', text).strip()
-            
-            # URL抽出
-            urls = self._collect_esa_urls(text, event.get('blocks'), event.get('attachments'))
-            if not urls:
-                say(f"<@{user_id}> ❌ エラー: esaのURLを指定してください\n\n{self._get_help_message()}")
-                return
-            
-            url = urls[0]
-            
-            # 処理中メッセージ
-            say(f"<@{user_id}> 📝 要約を生成中です... (長さ: {length}, 形式: {style})")
-            
-            # esa記事取得
-            post = self.esa_client.get_post_from_url(url)
-            if not post:
-                say(f"<@{user_id}> ❌ 記事の取得に失敗しました。URLを確認してください。")
-                return
-            
-            # 記事データ取得
-            post_data = post.get('post', post)
-            title = post_data.get('name', 'タイトルなし')
-            body = post_data.get('body_md', '')
-            category = post_data.get('category', '')
-            updated_at = post_data.get('updated_at', '')
-            post_number = post_data.get('number', '')
-            
-            if not body:
-                say(f"<@{user_id}> ❌ 記事の本文が空です。")
-                return
-            
-            # 要約生成
-            try:
-                with step("gemini_summarize"):
-                    summary = self.gemini_client.summarize(title, body, category, length, style)
-                    summary = self._normalize_numbering(summary)
-                
-                # 結果を整形して投稿
-                with step("format_and_send"):
-                    message_payload = self._format_summary_message(
-                        title, category, updated_at, summary, url, length, style, post_number, len(body)
-                    )
-                    response = say(**message_payload)
-                    if DEBUG_VERBOSE:
-                        logger.debug(f"chat.postMessage response={truncate(str(response),400)}")
-                
-            except Exception as e:
-                say(f"<@{user_id}> ❌ 要約生成中にエラーが発生しました: {str(e)}")
-        
+            self._on_mention(event, say)
+
         @self.app.error
         def handle_errors(error):
             logger.exception(f"Slack Bolt エラー: {error}")
     
+    def _on_message(self, event, client):
+        """監視チャンネルに届いたBot投稿からesaのURLを拾い、自動要約する。"""
+        if DEBUG_VERBOSE:
+            logger.info(f"メッセージイベント受信: {truncate(str(event),800)}")
+        with step("message_event"):
+            log_kv("message.meta", subtype=event.get('subtype'), channel=event.get('channel'))
+
+        # 削除のサブタイプは無視（bot_messageのみ処理する。message_changedは重複防止のため無視）
+        subtype = event.get('subtype')
+        if subtype and subtype not in ['bot_message']:
+            logger.debug(f"サブタイプ '{subtype}' のため無視")
+            return
+
+        text = event.get('text', '')
+        bot_id = event.get('bot_id')
+        bot_profile = event.get('bot_profile')
+
+        # blocksのみの場合のフォールバック（esa通知でtextが空になるケース対応）
+        if not text and 'blocks' in event:
+            rebuilt = self._extract_text_from_blocks(event.get('blocks', []))
+            if rebuilt:
+                text = rebuilt
+                logger.debug(f"blocksから再構築したテキスト: {text[:200]}")
+
+        # チャンネルIDを取得
+        channel_id = event.get('channel')
+        logger.debug(f"チャンネルID: {channel_id}, 監視対象: {ESA_WATCH_CHANNEL_ID}")
+
+        # 監視対象チャンネル以外は無視
+        if not ESA_WATCH_CHANNEL_ID or channel_id != ESA_WATCH_CHANNEL_ID:
+            logger.debug(f"監視対象外のチャンネル '{channel_id}' のため無視")
+            return
+
+        # esaアプリ（または他のBot）からのメッセージか確認
+        # message_changed の場合はネスト内の bot 情報を使うため、ここで上書きしない
+        logger.info(f"チャンネル '{channel_id}' でメッセージ検出: bot_id={bot_id}, bot_profile={bool(bot_profile)}")
+
+        if not bot_id and not bot_profile:
+            logger.debug(f"人間からのメッセージのため無視: {text[:50] if text else ''}")
+            return  # 人間のメッセージは無視
+
+        logger.info(f"Botメッセージを検出: bot_id={bot_id}, チャンネルID={channel_id}")
+
+        # 自分のメッセージは無視
+        if self.bot_user_id and event.get('user') == self.bot_user_id:
+            logger.debug("自分のメッセージのため無視")
+            return
+
+        # esa URLを抽出（text/blocks/attachments すべてを見る）
+        urls = self._collect_esa_urls(text, event.get('blocks'), event.get('attachments'))
+
+        if not urls:
+            return  # esa URLが含まれていなければ無視
+
+        # 各URLについて要約を生成（重複を除く）
+        processed_urls = set()
+        for url in urls:
+            # URLのクリーンアップ（末尾の記号を除去）
+            url = re.sub(r'[)>]$', '', url)
+
+            if url in processed_urls:
+                continue
+            processed_urls.add(url)
+
+            # 要約を非同期的に処理（投稿元チャンネルIDを渡す）
+            with step("auto_summary_one"):
+                self._process_auto_summary(url, client, channel_id)
+
+    def _on_mention(self, event, say):
+        """メンションで指定されたesa記事を要約して返信する。"""
+        if DEBUG_VERBOSE:
+            logger.info(f"メンションイベント受信: {truncate(str(event),800)}")
+        with step("mention_event"):
+            log_kv("mention.meta", user=event.get('user'), channel=event.get('channel'))
+        # 安全にテキスト取得（blocksのみの場合のフォールバック）
+        text = event.get('text', '') or ''
+        if not text and 'blocks' in event:
+            try:
+                text = self._extract_text_from_blocks(event.get('blocks', []))
+                logger.debug(f"blocksから再構築したテキスト: {text}")
+            except Exception as e:
+                logger.warning(f"blocksからテキスト再構築失敗: {e}")
+        user_id = event['user']
+
+        # Botのメンション部分を除去
+        # <@U12345678> https://... -> https://...
+        text = re.sub(r'<@[A-Z0-9]+>', '', text).strip()
+
+        # ヘルプメッセージ
+        if not text or 'help' in text.lower() or 'ヘルプ' in text:
+            help_message = self._get_help_message()
+            say(f"<@{user_id}>\n{help_message}")
+            return
+
+        # --length short などのオプション解析
+        length, style, text = self._parse_options(text)
+
+        # URL抽出
+        urls = self._collect_esa_urls(text, event.get('blocks'), event.get('attachments'))
+        if not urls:
+            say(f"<@{user_id}> ❌ エラー: esaのURLを指定してください\n\n{self._get_help_message()}")
+            return
+
+        url = urls[0]
+
+        # 処理中メッセージ
+        say(f"<@{user_id}> 📝 要約を生成中です... (長さ: {length}, 形式: {style})")
+
+        # esa記事取得
+        post = self.esa_client.get_post_from_url(url)
+        if not post:
+            say(f"<@{user_id}> ❌ 記事の取得に失敗しました。URLを確認してください。")
+            return
+
+        fields = self._post_fields(post)
+
+        if not fields['body']:
+            say(f"<@{user_id}> ❌ 記事の本文が空です。")
+            return
+
+        # 要約生成
+        try:
+            summary = self._summarize(fields, length, style, "gemini_summarize")
+
+            # 結果を整形して投稿
+            with step("format_and_send"):
+                message_payload = self._summary_payload(fields, summary, url, length, style)
+                response = say(**message_payload)
+                if DEBUG_VERBOSE:
+                    logger.debug(f"chat.postMessage response={truncate(str(response),400)}")
+
+        except Exception as e:
+            say(f"<@{user_id}> ❌ 要約生成中にエラーが発生しました: {str(e)}")
+
+    @staticmethod
+    def _parse_options(text: str):
+        """`--length` と `--style` を取り出し、(長さ, 形式, 残りのテキスト) を返す。"""
+        length = "medium"
+        style = "bullet"
+
+        length_match = re.search(r'--length\s+(short|medium|long)', text)
+        if length_match:
+            length = length_match.group(1)
+            text = re.sub(r'--length\s+(short|medium|long)', '', text).strip()
+
+        style_match = re.search(r'--style\s+(bullet|paragraph)', text)
+        if style_match:
+            style = style_match.group(1)
+            text = re.sub(r'--style\s+(bullet|paragraph)', '', text).strip()
+
+        return length, style, text
+
+    @staticmethod
+    def _post_fields(post: dict) -> dict:
+        """esa APIの応答から要約に使う項目を取り出す。"""
+        post_data = post.get('post', post)
+        return {
+            'title': post_data.get('name', 'タイトルなし'),
+            'body': post_data.get('body_md', ''),
+            'category': post_data.get('category', ''),
+            'updated_at': post_data.get('updated_at', ''),
+            'post_number': post_data.get('number', ''),
+        }
+
+    def _summarize(self, fields: dict, length: str, style: str, step_name: str) -> str:
+        with step(step_name):
+            summary = self.gemini_client.summarize(fields['title'], fields['body'], fields['category'], length, style)
+            return self._normalize_numbering(summary)
+
+    def _summary_payload(self, fields: dict, summary: str, url: str, length: str, style: str) -> dict:
+        return self._format_summary_message(
+            fields['title'], fields['category'], fields['updated_at'], summary, url,
+            length, style, fields['post_number'], len(fields['body'])
+        )
+
     def _process_auto_summary(self, url: str, client, source_channel_id: str):
         """自動要約を処理"""
         try:
@@ -218,14 +245,9 @@ class SlackBot:
                 logger.warning(f"記事の取得に失敗: {url}")
                 return
             
-            # 記事データ取得
-            post_data = post.get('post', post)
-            title = post_data.get('name', 'タイトルなし')
-            body = post_data.get('body_md', '')
-            category = post_data.get('category', '')
-            updated_at = post_data.get('updated_at', '')
-            post_number = post_data.get('number', '')
-            
+            fields = self._post_fields(post)
+            title, body = fields['title'], fields['body']
+
             if not body:
                 logger.warning(f"記事の本文が空: {url}")
                 return
@@ -235,14 +257,10 @@ class SlackBot:
             length = "medium"
             style = "bullet"
             
-            with step("gemini_auto_summarize"):
-                summary = self.gemini_client.summarize(title, body, category, length, style)
-                summary = self._normalize_numbering(summary)
-            
+            summary = self._summarize(fields, length, style, "gemini_auto_summarize")
+
             # 結果を整形して投稿
-            message_payload = self._format_summary_message(
-                title, category, updated_at, summary, url, length, style, post_number, len(body)
-            )
+            message_payload = self._summary_payload(fields, summary, url, length, style)
             
             # 各チャンネルに投稿
             for channel_id in summary_channel_ids:
